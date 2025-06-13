@@ -339,15 +339,14 @@ app.get('/callback', async (req, res) => {
     
     <script>
         function copyResults() {
-            const results = \`ApprovalMax Test Results:
-OAuth: ✅ SUCCESS
-Token Exchange: ${tokenInfo && tokenInfo.success ? '✅ SUCCESS' : '❌ FAILED'}
-API Test: ${apiInfo && apiInfo.success ? '✅ SUCCESS' : '❌ FAILED'}
-
-Auth Code: ${req.query.code}
-${tokenInfo && tokenInfo.success ? \`Access Token: ${tokenInfo.accessToken}\` : ''}
-${apiInfo && apiInfo.success ? \`API Data Count: ${apiInfo.dataCount}\` : ''}
-\`;
+            const results = 'ApprovalMax Test Results:\\n' +
+                'OAuth: ✅ SUCCESS\\n' +
+                'Token Exchange: ${tokenInfo && tokenInfo.success ? '✅ SUCCESS' : '❌ FAILED'}\\n' +
+                'API Test: ${apiInfo && apiInfo.success ? '✅ SUCCESS' : '❌ FAILED'}\\n\\n' +
+                'Auth Code: ${req.query.code}\\n' +
+                '${tokenInfo && tokenInfo.success ? 'Access Token: ' + tokenInfo.accessToken : ''}\\n' +
+                '${apiInfo && apiInfo.success ? 'API Data Count: ' + apiInfo.dataCount : ''}';
+            
             navigator.clipboard.writeText(results).then(() => {
                 alert('Test results copied to clipboard!');
             });
