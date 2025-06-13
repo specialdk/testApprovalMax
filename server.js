@@ -125,7 +125,8 @@ ${cb.tokenExchange.refreshToken ? `Refresh Token: ${cb.tokenExchange.refreshToke
 app.get('/callback', async (req, res) => {
     const timestamp = new Date().toISOString();
     const fullUrl = req.protocol + '://' + req.get('host') + req.originalUrl;
-    const redirectUri = req.protocol + '://' + req.get('host') + '/callback';
+    // Force HTTPS for redirect URI to match ApprovalMax app registration
+    const redirectUri = 'https://' + req.get('host') + '/callback';
     
     console.log('🎯 ApprovalMax Callback Received:', {
         timestamp,
