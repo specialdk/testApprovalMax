@@ -4,8 +4,8 @@
 const express = require('express');
 const fetch = require('node-fetch');
 const app = express();
-const port = process.env.PORT || 3000;
-
+//const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8080;
 // ApprovalMax Configuration - USING YOUR WORKING CREDENTIALS
 const APPROVALMAX_CONFIG = {
     clientId: process.env.APPROVALMAX_CLIENT_ID || '2A81A6DEEAA244C188D518BA59601780',
