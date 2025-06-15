@@ -1,4 +1,4 @@
-// ApprovalMax Callback Catcher - Minimal Railway App
+// ApprovalMax API Data Tester - Complete OAuth + API Testing
 // File: server.js
 
 const express = require('express');
@@ -6,29 +6,40 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// ApprovalMax configuration
-const AM_CONFIG = {
+// ApprovalMax Configuration - USING YOUR WORKING CREDENTIALS
+const APPROVALMAX_CONFIG = {
     clientId: process.env.APPROVALMAX_CLIENT_ID || '2A81A6DEEAA244C188D518BA59601780',
-    clientSecret: process.env.APPROVALMAX_CLIENT_SECRET,
+    clientSecret: process.env.APPROVALMAX_CLIENT_SECRET || '', // Set this in Railway env vars
+    redirectUri: 'https://rac-financial-dashboard-production.up.railway.app/callback/approvalmax',
+    baseUrl: 'https://public-api.approvalmax.com/api/v1',
+    authUrl: 'https://identity.approvalmax.com/connect/authorize',
     tokenUrl: 'https://identity.approvalmax.com/connect/token',
-    apiUrl: 'https://public-api.approvalmax.com/api/v1'
+    scopes: [
+        'https://www.approvalmax.com/scopes/public_api/read',
+        'https://www.approvalmax.com/scopes/public_api/write',
+        'offline_access'
+    ]
 };
 
-// Store callbacks in memory for this session
-let callbacks = [];
+// In-memory storage for tokens and debug data
+let tokenData = {};
+let debugResults = [];
 
-// Serve basic HTML page
+app.use(express.json());
+app.use(express.static('public'));
+
+// Homepage with testing interface
 app.get('/', (req, res) => {
     res.send(`
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ApprovalMax Callback Catcher</title>
+    <title>ApprovalMax API Data Tester</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
             padding: 20px;
             background: linear-gradient(135deg, #8B5A96 0%, #6A4C93 100%);
@@ -40,402 +51,660 @@ app.get('/', (req, res) => {
             padding: 30px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
-        h1 { color: #2d3748; text-align: center; }
-        .info { background: #eff6ff; border: 1px solid #3b82f6; color: #1d4ed8; padding: 15px; border-radius: 8px; margin: 15px 0; }
-        .callback { background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; margin: 15px 0; }
-        .success { background: #ecfdf5; border: 1px solid #10b981; color: #047857; padding: 15px; border-radius: 8px; }
-        .error { background: #fef2f2; border: 1px solid #ef4444; color: #dc2626; padding: 15px; border-radius: 8px; }
-        .code { font-family: monospace; background: #f3f4f6; padding: 8px; border-radius: 4px; font-size: 14px; }
-        button { background: #8B5A96; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin: 5px; }
+        h1 { color: #2d3748; text-align: center; margin-bottom: 30px; }
+        .section {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .section h3 { margin-top: 0; color: #4a5568; }
+        .status {
+            padding: 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-weight: 500;
+        }
+        .status.connected { background: #ecfdf5; border: 1px solid #10b981; color: #047857; }
+        .status.disconnected { background: #fef2f2; border: 1px solid #ef4444; color: #dc2626; }
+        .status.pending { background: #fffbeb; border: 1px solid #f59e0b; color: #d97706; }
+        button {
+            background: #8B5A96;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
         button:hover { background: #6A4C93; }
-        .timestamp { color: #6b7280; font-size: 12px; }
+        button:disabled { background: #9ca3af; cursor: not-allowed; }
+        .result {
+            background: #1f2937;
+            color: #f9fafb;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin: 15px 0;
+        }
+        .highlight { background: #fef3c7; padding: 2px 4px; border-radius: 3px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎯 ApprovalMax Callback Catcher</h1>
+        <h1>🔍 ApprovalMax API Data Tester</h1>
         
-        <div class="info">
-            <strong>📡 Callback URL:</strong><br>
-            <div class="code">${req.get('host')}/callback</div>
-            <br>
-            <strong>📋 How to use:</strong><br>
-            1. Use the URL above as your ApprovalMax redirect URI<br>
-            2. Complete the OAuth flow<br>
-            3. Check this page to see what ApprovalMax sent back<br>
+        <!-- Connection Status -->
+        <div class="section">
+            <h3>🔗 Connection Status</h3>
+            <div id="connectionStatus" class="status disconnected">
+                ❌ Not Connected - Need to authenticate first
+            </div>
+            <p><strong>Current Setup:</strong></p>
+            <ul>
+                <li>Client ID: ${APPROVALMAX_CONFIG.clientId}</li>
+                <li>Redirect URI: ${APPROVALMAX_CONFIG.redirectUri}</li>
+                <li>Token Status: <span id="tokenStatus">No tokens</span></li>
+            </ul>
         </div>
 
-        <div style="text-align: center; margin: 20px 0;">
-            <button onclick="window.location.reload()">🔄 Refresh Page</button>
-            <button onclick="clearCallbacks()">🗑️ Clear History</button>
-            <button onclick="window.location.href='/status'">📊 Status</button>
+        <!-- Authentication -->
+        <div class="section">
+            <h3>🔐 Step 1: Authentication</h3>
+            <p>This will use your <span class="highlight">working OAuth credentials</span> that successfully connect to 3 organizations.</p>
+            <button onclick="startAuth()">🚀 Start ApprovalMax Authentication</button>
+            <div id="authResult"></div>
         </div>
 
-        <h3>Recent Callbacks (${callbacks.length})</h3>
-        ${callbacks.length === 0 ? 
-            '<div class="info">No callbacks received yet. Complete the ApprovalMax OAuth flow to see results here.</div>' :
-            callbacks.map((cb, index) => `
-                <div class="callback">
-                    <strong>Callback #${callbacks.length - index}</strong>
-                    <span class="timestamp">${cb.timestamp}</span>
-                    ${cb.success ? 
-                        `<div class="success">✅ Authorization Code Received!</div>` :
-                        `<div class="error">❌ Error - ${cb.error}</div>`
-                    }
-                    <strong>URL:</strong> <div class="code">${cb.url}</div>
-                    <strong>Parameters:</strong>
-                    <pre class="code">${JSON.stringify(cb.params, null, 2)}</pre>
-                    
-                    ${cb.tokenExchange ? `
-                        <strong>Token Exchange:</strong>
-                        ${cb.tokenExchange.success ? 
-                            `<div class="success">✅ Success - Access token obtained!</div>
-                             <div class="code">Access Token: ${cb.tokenExchange.accessToken}
-Expires In: ${cb.tokenExchange.expiresIn} seconds
-${cb.tokenExchange.refreshToken ? `Refresh Token: ${cb.tokenExchange.refreshToken}` : ''}</div>` :
-                            `<div class="error">❌ Failed - ${cb.tokenExchange.error}</div>`
-                        }
-                    ` : ''}
-                    
-                    ${cb.apiTest ? `
-                        <strong>API Test:</strong>
-                        ${cb.apiTest.success ? 
-                            `<div class="success">✅ Success - ${cb.apiTest.dataCount} items retrieved from ${cb.apiTest.endpoint}</div>
-                             <div class="code">${JSON.stringify(cb.apiTest.sampleData, null, 2)}</div>` :
-                            `<div class="error">❌ Failed - ${cb.apiTest.error}</div>`
-                        }
-                    ` : ''}
-                </div>
-            `).join('')
-        }
+        <!-- API Testing -->
+        <div class="section">
+            <h3>📊 Step 2: API Data Testing</h3>
+            <p>Once authenticated, test these endpoints to find your Purchase Order events:</p>
+            
+            <div class="button-grid">
+                <button onclick="testEndpoint('/companies')" disabled id="btn-companies">🏢 Test Companies</button>
+                <button onclick="testEndpoint('/documents')" disabled id="btn-documents">📄 Test Documents</button>
+                <button onclick="testEndpoint('/purchase-orders')" disabled id="btn-pos">🛒 Test Purchase Orders</button>
+                <button onclick="testEndpoint('/bills')" disabled id="btn-bills">🧾 Test Bills</button>
+            </div>
+            
+            <h4>🎯 Purchase Order Events (Main Focus):</h4>
+            <div class="button-grid">
+                <button onclick="testPOEvents()" disabled id="btn-po-events">⚡ Test PO Events</button>
+                <button onclick="testPOEventsPerOrg()" disabled id="btn-po-events-org">🏢 Test PO Events Per Organization</button>
+                <button onclick="debugEmptyArrays()" disabled id="btn-debug">🔍 Debug Empty Arrays Issue</button>
+            </div>
+            
+            <div id="apiResult"></div>
+        </div>
+
+        <!-- Debug Information -->
+        <div class="section">
+            <h3>🐛 Debug Information</h3>
+            <p>This will help us understand why you're getting empty arrays despite having 2 POs waiting for approval.</p>
+            <button onclick="showDebugInfo()" disabled id="btn-debug-info">📋 Show Debug Info</button>
+            <div id="debugInfo"></div>
+        </div>
     </div>
-    
+
     <script>
-        function clearCallbacks() {
-            fetch('/clear', { method: 'POST' })
-                .then(() => window.location.reload());
+        let isAuthenticated = false;
+
+        // Start authentication flow
+        function startAuth() {
+            const authUrl = '/auth/start';
+            
+            fetch(authUrl)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.authUrl) {
+                        document.getElementById('authResult').innerHTML = 
+                            '<div class="status pending">🔄 Redirecting to ApprovalMax...</div>';
+                        window.location.href = data.authUrl;
+                    } else {
+                        document.getElementById('authResult').innerHTML = 
+                            '<div class="status disconnected">❌ Error: ' + (data.error || 'Failed to generate auth URL') + '</div>';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('authResult').innerHTML = 
+                        '<div class="status disconnected">❌ Network Error: ' + error.message + '</div>';
+                });
         }
+
+        // Test API endpoints
+        function testEndpoint(endpoint) {
+            showLoading('apiResult');
+            
+            fetch('/test' + endpoint)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('apiResult').innerHTML = 
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
+                })
+                .catch(error => {
+                    document.getElementById('apiResult').innerHTML = 
+                        '<div class="status disconnected">❌ Error: ' + error.message + '</div>';
+                });
+        }
+
+        // Test Purchase Order Events specifically
+        function testPOEvents() {
+            showLoading('apiResult');
+            fetch('/test/po-events')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('apiResult').innerHTML = 
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
+                });
+        }
+
+        // Test PO Events per organization
+        function testPOEventsPerOrg() {
+            showLoading('apiResult');
+            fetch('/test/po-events-per-org')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('apiResult').innerHTML = 
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
+                });
+        }
+
+        // Debug empty arrays issue
+        function debugEmptyArrays() {
+            showLoading('apiResult');
+            fetch('/debug/empty-arrays')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('apiResult').innerHTML = 
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
+                });
+        }
+
+        // Show debug information
+        function showDebugInfo() {
+            fetch('/debug/info')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('debugInfo').innerHTML = 
+                        '<div class="result">' + JSON.stringify(data, null, 2) + '</div>';
+                });
+        }
+
+        // Helper functions
+        function showLoading(elementId) {
+            document.getElementById(elementId).innerHTML = 
+                '<div class="status pending">🔄 Loading...</div>';
+        }
+
+        function enableButtons() {
+            const buttons = ['btn-companies', 'btn-documents', 'btn-pos', 'btn-bills', 
+                           'btn-po-events', 'btn-po-events-org', 'btn-debug', 'btn-debug-info'];
+            buttons.forEach(id => {
+                document.getElementById(id).disabled = false;
+            });
+        }
+
+        // Check authentication status on page load
+        fetch('/auth/status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.authenticated) {
+                    document.getElementById('connectionStatus').innerHTML = 
+                        '✅ Connected - Ready to test API endpoints';
+                    document.getElementById('connectionStatus').className = 'status connected';
+                    document.getElementById('tokenStatus').textContent = 'Valid access token available';
+                    enableButtons();
+                    isAuthenticated = true;
+                }
+            })
+            .catch(() => {
+                // Ignore errors on page load
+            });
     </script>
 </body>
 </html>
     `);
 });
 
-// Main callback endpoint - this is where ApprovalMax will redirect
-app.get('/callback', async (req, res) => {
-    const timestamp = new Date().toISOString();
-    const fullUrl = req.protocol + '://' + req.get('host') + req.originalUrl;
-    // Force HTTPS for redirect URI to match ApprovalMax app registration
-    const redirectUri = 'https://' + req.get('host') + '/callback';
-    
-    console.log('🎯 ApprovalMax Callback Received:', {
-        timestamp,
-        url: fullUrl,
-        query: req.query,
+// Generate auth URL and redirect
+app.get('/auth/start', (req, res) => {
+    try {
+        const state = Math.random().toString(36).substring(2, 15);
+        
+        const params = new URLSearchParams({
+            response_type: 'code',
+            client_id: APPROVALMAX_CONFIG.clientId,
+            scope: APPROVALMAX_CONFIG.scopes.join(' '),
+            redirect_uri: APPROVALMAX_CONFIG.redirectUri,
+            state: state
+        });
+
+        const authUrl = `${APPROVALMAX_CONFIG.authUrl}?${params.toString()}`;
+        
+        // Store state for verification
+        tokenData.state = state;
+        
+        res.json({ authUrl });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// OAuth callback handler - THIS IS THE CRITICAL ENDPOINT FROM YOUR HANDOVER
+app.get('/callback/approvalmax', async (req, res) => {
+    try {
+        const { code, state, error } = req.query;
+        
+        console.log('🎯 ApprovalMax callback received:', { code: !!code, state, error });
+        
+        if (error) {
+            return res.status(400).send(`
+                <h1>❌ ApprovalMax Authorization Failed</h1>
+                <p>Error: ${error}</p>
+                <p>Description: ${req.query.error_description || 'No description provided'}</p>
+                <a href="/">🏠 Back to Home</a>
+            `);
+        }
+
+        if (!code) {
+            return res.status(400).send(`
+                <h1>❌ No Authorization Code</h1>
+                <p>ApprovalMax did not provide an authorization code.</p>
+                <a href="/">🏠 Back to Home</a>
+            `);
+        }
+
+        // Exchange code for tokens
+        const tokenResponse = await fetch(APPROVALMAX_CONFIG.tokenUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                grant_type: 'authorization_code',
+                client_id: APPROVALMAX_CONFIG.clientId,
+                client_secret: APPROVALMAX_CONFIG.clientSecret,
+                redirect_uri: APPROVALMAX_CONFIG.redirectUri,
+                code: code
+            })
+        });
+
+        const tokens = await tokenResponse.json();
+        
+        if (!tokenResponse.ok) {
+            console.error('❌ Token exchange failed:', tokens);
+            return res.status(400).send(`
+                <h1>❌ Token Exchange Failed</h1>
+                <p>Error: ${tokens.error}</p>
+                <p>Description: ${tokens.error_description || 'No description provided'}</p>
+                <a href="/">🏠 Back to Home</a>
+            `);
+        }
+
+        // Store tokens
+        tokenData.accessToken = tokens.access_token;
+        tokenData.refreshToken = tokens.refresh_token;
+        tokenData.expiresAt = Date.now() + (tokens.expires_in * 1000);
+        
+        console.log('✅ ApprovalMax tokens obtained successfully');
+        
+        res.send(`
+            <h1>🎉 ApprovalMax Authentication Successful!</h1>
+            <p>✅ Access token obtained</p>
+            <p>✅ Ready to test API endpoints</p>
+            <p><strong>Next steps:</strong></p>
+            <ol>
+                <li>Go back to the <a href="/">testing interface</a></li>
+                <li>Test the Purchase Order Events endpoint</li>
+                <li>Debug why you're getting empty arrays</li>
+            </ol>
+            <script>
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 3000);
+            </script>
+        `);
+
+    } catch (error) {
+        console.error('❌ Callback error:', error);
+        res.status(500).send(`
+            <h1>❌ Server Error</h1>
+            <p>Error: ${error.message}</p>
+            <a href="/">🏠 Back to Home</a>
+        `);
+    }
+});
+
+// Check authentication status
+app.get('/auth/status', (req, res) => {
+    const authenticated = !!(tokenData.accessToken && tokenData.expiresAt > Date.now());
+    res.json({ 
+        authenticated,
+        expiresAt: tokenData.expiresAt,
+        hasRefreshToken: !!tokenData.refreshToken
+    });
+});
+
+// Helper function to make authenticated API requests
+async function makeApiRequest(endpoint, options = {}) {
+    if (!tokenData.accessToken) {
+        throw new Error('No access token available');
+    }
+
+    const url = `${APPROVALMAX_CONFIG.baseUrl}${endpoint}`;
+    const response = await fetch(url, {
+        ...options,
         headers: {
-            'user-agent': req.get('user-agent'),
-            'referer': req.get('referer')
+            'Authorization': `Bearer ${tokenData.accessToken}`,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            ...(options.headers || {})
         }
     });
 
-    const callbackData = {
-        timestamp,
-        url: fullUrl,
-        params: req.query,
-        success: !!req.query.code,
-        error: req.query.error || (req.query.code ? null : 'No authorization code received')
-    };
+    const data = await response.json();
+    
+    if (!response.ok) {
+        throw new Error(`API Error: ${response.status} - ${data.error || data.message || 'Unknown error'}`);
+    }
 
-    // Store callback (keep last 10)
-    callbacks.unshift(callbackData);
-    if (callbacks.length > 10) callbacks = callbacks.slice(0, 10);
+    return { status: response.status, data, headers: response.headers };
+}
 
-    // If we have an authorization code, try to exchange it for tokens
-    if (req.query.code && AM_CONFIG.clientSecret) {
-        try {
-            console.log('🔄 Attempting token exchange...');
-            
-            const tokenResponse = await fetch(AM_CONFIG.tokenUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Accept': 'application/json'
-                },
-                body: new URLSearchParams({
-                    grant_type: 'authorization_code',
-                    client_id: AM_CONFIG.clientId,
-                    client_secret: AM_CONFIG.clientSecret,
-                    redirect_uri: redirectUri,
-                    code: req.query.code
-                })
-            });
+// Test endpoints
+app.get('/test/companies', async (req, res) => {
+    try {
+        const result = await makeApiRequest('/companies');
+        res.json({
+            success: true,
+            endpoint: '/companies',
+            ...result
+        });
+    } catch (error) {
+        res.json({
+            success: false,
+            endpoint: '/companies',
+            error: error.message
+        });
+    }
+});
 
-            const tokenData = await tokenResponse.json();
-            
-            if (tokenResponse.ok && tokenData.access_token) {
-                console.log('✅ Token exchange successful');
-                callbackData.tokenExchange = {
+app.get('/test/documents', async (req, res) => {
+    try {
+        const result = await makeApiRequest('/documents?limit=20');
+        res.json({
+            success: true,
+            endpoint: '/documents',
+            count: result.data?.length || 0,
+            ...result
+        });
+    } catch (error) {
+        res.json({
+            success: false,
+            endpoint: '/documents',
+            error: error.message
+        });
+    }
+});
+
+app.get('/test/purchase-orders', async (req, res) => {
+    try {
+        const result = await makeApiRequest('/purchase-orders?limit=20');
+        res.json({
+            success: true,
+            endpoint: '/purchase-orders',
+            count: result.data?.length || 0,
+            ...result
+        });
+    } catch (error) {
+        res.json({
+            success: false,
+            endpoint: '/purchase-orders',
+            error: error.message
+        });
+    }
+});
+
+app.get('/test/bills', async (req, res) => {
+    try {
+        const result = await makeApiRequest('/bills?limit=20');
+        res.json({
+            success: true,
+            endpoint: '/bills',
+            count: result.data?.length || 0,
+            ...result
+        });
+    } catch (error) {
+        res.json({
+            success: false,
+            endpoint: '/bills',
+            error: error.message
+        });
+    }
+});
+
+// MAIN FOCUS: Purchase Order Events Testing
+app.get('/test/po-events', async (req, res) => {
+    try {
+        // Try multiple possible endpoints for PO events
+        const attempts = [
+            '/purchase-orders/events',
+            '/events?type=purchase-order',
+            '/documents/events?documentType=PurchaseOrder',
+            '/purchase-order-events'
+        ];
+
+        const results = {};
+        
+        for (const endpoint of attempts) {
+            try {
+                const result = await makeApiRequest(endpoint + '?limit=50');
+                results[endpoint] = {
                     success: true,
-                    accessToken: tokenData.access_token.substring(0, 20) + '...',
-                    refreshToken: tokenData.refresh_token ? tokenData.refresh_token.substring(0, 20) + '...' : null,
-                    expiresIn: tokenData.expires_in,
-                    tokenType: tokenData.token_type
+                    count: result.data?.length || 0,
+                    data: result.data
                 };
-
-                // Test API call with the new token
-                try {
-                    console.log('🧪 Testing API call...');
-                    const apiResponse = await fetch(`${AM_CONFIG.apiUrl}/companies`, {
-                        headers: {
-                            'Authorization': `Bearer ${tokenData.access_token}`,
-                            'Accept': 'application/json'
-                        }
-                    });
-                    
-                    const apiData = await apiResponse.json();
-                    
-                    if (apiResponse.ok) {
-                        console.log('✅ API test successful');
-                        callbackData.apiTest = {
-                            success: true,
-                            endpoint: '/companies',
-                            dataCount: Array.isArray(apiData) ? apiData.length : 'N/A',
-                            sampleData: Array.isArray(apiData) && apiData.length > 0 ? apiData[0] : apiData
-                        };
-                    } else {
-                        console.log('❌ API test failed');
-                        callbackData.apiTest = {
-                            success: false,
-                            error: apiData.error || 'API call failed',
-                            status: apiResponse.status
-                        };
-                    }
-                } catch (apiError) {
-                    console.log('❌ API test error:', apiError.message);
-                    callbackData.apiTest = {
-                        success: false,
-                        error: apiError.message
-                    };
-                }
-
-            } else {
-                console.log('❌ Token exchange failed');
-                callbackData.tokenExchange = {
+            } catch (error) {
+                results[endpoint] = {
                     success: false,
-                    error: tokenData.error || 'Token exchange failed',
-                    errorDescription: tokenData.error_description,
-                    status: tokenResponse.status
+                    error: error.message
                 };
             }
+        }
 
-        } catch (error) {
-            console.log('❌ Token exchange error:', error.message);
-            callbackData.tokenExchange = {
-                success: false,
-                error: error.message
+        res.json({
+            message: 'Testing multiple possible PO Events endpoints',
+            attempts,
+            results
+        });
+    } catch (error) {
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Test PO Events per organization
+app.get('/test/po-events-per-org', async (req, res) => {
+    try {
+        // First get organizations
+        const companiesResult = await makeApiRequest('/companies');
+        const organizations = companiesResult.data || [];
+
+        const results = {
+            organizations: organizations.map(org => ({ id: org.id, name: org.name })),
+            poEventsByOrg: {}
+        };
+
+        // Test PO events for each organization
+        for (const org of organizations) {
+            try {
+                const poResult = await makeApiRequest(`/purchase-orders?organizationId=${org.id}&limit=50`);
+                results.poEventsByOrg[org.name] = {
+                    organizationId: org.id,
+                    purchaseOrders: poResult.data?.length || 0,
+                    data: poResult.data || []
+                };
+
+                // Also try to get events for each PO
+                if (poResult.data && poResult.data.length > 0) {
+                    for (const po of poResult.data.slice(0, 5)) { // Limit to first 5 POs
+                        try {
+                            const eventsResult = await makeApiRequest(`/purchase-orders/${po.id}/events`);
+                            if (!results.poEventsByOrg[org.name].events) {
+                                results.poEventsByOrg[org.name].events = {};
+                            }
+                            results.poEventsByOrg[org.name].events[po.id] = eventsResult.data;
+                        } catch (eventError) {
+                            // Event endpoint might not exist
+                        }
+                    }
+                }
+            } catch (error) {
+                results.poEventsByOrg[org.name] = {
+                    error: error.message
+                };
+            }
+        }
+
+        res.json(results);
+    } catch (error) {
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// Debug empty arrays issue
+app.get('/debug/empty-arrays', async (req, res) => {
+    try {
+        const debug = {
+            timestamp: new Date().toISOString(),
+            problem: "Getting empty arrays despite 2 POs waiting for approval",
+            knownFacts: {
+                mining: "1 PO waiting for approval",
+                enterprise: "1 PO waiting for approval", 
+                totalExpected: 2
+            },
+            tests: {}
+        };
+
+        // Test 1: Basic PO endpoint
+        try {
+            const poResult = await makeApiRequest('/purchase-orders');
+            debug.tests.basicPOs = {
+                success: true,
+                count: poResult.data?.length || 0,
+                isEmpty: !poResult.data || poResult.data.length === 0,
+                sampleData: poResult.data?.slice(0, 3) || []
             };
+        } catch (error) {
+            debug.tests.basicPOs = { success: false, error: error.message };
         }
-    }
 
-    // Update stored callback with token exchange results
-    callbacks[0] = callbackData;
-
-    // Display the result immediately
-    if (req.query.code) {
-        const tokenInfo = callbackData.tokenExchange;
-        const apiInfo = callbackData.apiTest;
+        // Test 2: POs with different status filters
+        const statusFilters = ['pending', 'waiting', 'awaiting', 'submitted', 'draft'];
+        debug.tests.statusFilters = {};
         
-        res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ApprovalMax Complete Test Results</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-        .success { background: #ecfdf5; border: 2px solid #10b981; color: #047857; padding: 20px; border-radius: 12px; margin: 15px 0; }
-        .error { background: #fef2f2; border: 2px solid #ef4444; color: #dc2626; padding: 20px; border-radius: 12px; margin: 15px 0; }
-        .warning { background: #fffbeb; border: 2px solid #f59e0b; color: #92400e; padding: 20px; border-radius: 12px; margin: 15px 0; }
-        .code { font-family: monospace; background: #f3f4f6; padding: 10px; border-radius: 6px; margin: 10px 0; word-break: break-all; font-size: 12px; }
-        button { background: #10b981; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; margin: 10px 5px; }
-        button:hover { background: #059669; }
-        h2 { margin-top: 30px; color: #374151; }
-        .step { margin: 20px 0; padding: 15px; border-left: 4px solid #e5e7eb; }
-        .step.success { border-left-color: #10b981; }
-        .step.error { border-left-color: #ef4444; }
-    </style>
-</head>
-<body>
-    <h1>🧪 ApprovalMax Complete Test Results</h1>
-    
-    <div class="step success">
-        <h2>✅ Step 1: OAuth Authorization</h2>
-        <p><strong>Status:</strong> SUCCESS</p>
-        <p><strong>Authorization Code:</strong></p>
-        <div class="code">${req.query.code}</div>
-        ${req.query.state ? `<p><strong>State:</strong> <span class="code">${req.query.state}</span></p>` : ''}
-    </div>
-    
-    <div class="step ${tokenInfo ? (tokenInfo.success ? 'success' : 'error') : 'error'}">
-        <h2>${tokenInfo && tokenInfo.success ? '✅' : '❌'} Step 2: Token Exchange</h2>
-        ${tokenInfo ? (tokenInfo.success ? `
-            <div class="success">
-                <p><strong>Status:</strong> SUCCESS</p>
-                <p><strong>Access Token:</strong> ${tokenInfo.accessToken}</p>
-                <p><strong>Token Type:</strong> ${tokenInfo.tokenType}</p>
-                <p><strong>Expires In:</strong> ${tokenInfo.expiresIn} seconds</p>
-                ${tokenInfo.refreshToken ? `<p><strong>Refresh Token:</strong> ${tokenInfo.refreshToken}</p>` : ''}
-            </div>
-        ` : `
-            <div class="error">
-                <p><strong>Status:</strong> FAILED</p>
-                <p><strong>Error:</strong> ${tokenInfo.error}</p>
-                ${tokenInfo.errorDescription ? `<p><strong>Description:</strong> ${tokenInfo.errorDescription}</p>` : ''}
-                ${tokenInfo.status ? `<p><strong>HTTP Status:</strong> ${tokenInfo.status}</p>` : ''}
-            </div>
-        `) : `
-            <div class="warning">
-                <p><strong>Status:</strong> SKIPPED</p>
-                <p>No client secret provided - add APPROVALMAX_CLIENT_SECRET environment variable to test token exchange</p>
-            </div>
-        `}
-    </div>
-    
-    <div class="step ${apiInfo ? (apiInfo.success ? 'success' : 'error') : 'error'}">
-        <h2>${apiInfo && apiInfo.success ? '✅' : '❌'} Step 3: API Test</h2>
-        ${apiInfo ? (apiInfo.success ? `
-            <div class="success">
-                <p><strong>Status:</strong> SUCCESS</p>
-                <p><strong>Endpoint:</strong> ${apiInfo.endpoint}</p>
-                <p><strong>Data Count:</strong> ${apiInfo.dataCount}</p>
-                <p><strong>Sample Data:</strong></p>
-                <div class="code">${JSON.stringify(apiInfo.sampleData, null, 2)}</div>
-            </div>
-        ` : `
-            <div class="error">
-                <p><strong>Status:</strong> FAILED</p>
-                <p><strong>Error:</strong> ${apiInfo.error}</p>
-                ${apiInfo.status ? `<p><strong>HTTP Status:</strong> ${apiInfo.status}</p>` : ''}
-            </div>
-        `) : `
-            <div class="warning">
-                <p><strong>Status:</strong> SKIPPED</p>
-                <p>Token exchange failed - cannot test API</p>
-            </div>
-        `}
-    </div>
-    
-    <h2>📋 Summary</h2>
-    <div class="${tokenInfo && tokenInfo.success && apiInfo && apiInfo.success ? 'success' : 'warning'}">
-        ${tokenInfo && tokenInfo.success && apiInfo && apiInfo.success ? 
-            '<p><strong>🎉 COMPLETE SUCCESS!</strong> ApprovalMax integration is fully working. You can now implement this in your main dashboard.</p>' :
-            '<p><strong>⚠️ PARTIAL SUCCESS</strong> OAuth flow works, but check the steps above for any issues with token exchange or API access.</p>'
+        for (const status of statusFilters) {
+            try {
+                const result = await makeApiRequest(`/purchase-orders?status=${status}`);
+                debug.tests.statusFilters[status] = {
+                    count: result.data?.length || 0,
+                    data: result.data?.slice(0, 2) || []
+                };
+            } catch (error) {
+                debug.tests.statusFilters[status] = { error: error.message };
+            }
         }
-    </div>
-    
-    <div style="text-align: center; margin-top: 30px;">
-        <button onclick="window.location.href='/'">🏠 Back to Home</button>
-        <button onclick="copyResults()">📋 Copy Full Results</button>
-    </div>
-    
-    <script>
-        function copyResults() {
-            const results = 'ApprovalMax Test Results:\\n' +
-                'OAuth: ✅ SUCCESS\\n' +
-                'Token Exchange: ${tokenInfo && tokenInfo.success ? '✅ SUCCESS' : '❌ FAILED'}\\n' +
-                'API Test: ${apiInfo && apiInfo.success ? '✅ SUCCESS' : '❌ FAILED'}\\n\\n' +
-                'Auth Code: ${req.query.code}\\n' +
-                '${tokenInfo && tokenInfo.success ? 'Access Token: ' + tokenInfo.accessToken : ''}\\n' +
-                '${apiInfo && apiInfo.success ? 'API Data Count: ' + apiInfo.dataCount : ''}';
+
+        // Test 3: Documents endpoint (might contain POs)
+        try {
+            const docResult = await makeApiRequest('/documents?limit=50');
+            const poDocuments = docResult.data?.filter(doc => 
+                doc.type === 'PurchaseOrder' || 
+                doc.documentType === 'PurchaseOrder' ||
+                (doc.name && doc.name.toLowerCase().includes('purchase'))
+            ) || [];
             
-            navigator.clipboard.writeText(results).then(() => {
-                alert('Test results copied to clipboard!');
-            });
+            debug.tests.documentsAsPOs = {
+                totalDocuments: docResult.data?.length || 0,
+                poDocuments: poDocuments.length,
+                poData: poDocuments.slice(0, 3)
+            };
+        } catch (error) {
+            debug.tests.documentsAsPOs = { error: error.message };
         }
-    </script>
-</body>
-</html>
-        `);
-    } else if (req.query.error) {
-        res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ApprovalMax Callback Error</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-        .error { background: #fef2f2; border: 2px solid #ef4444; color: #dc2626; padding: 20px; border-radius: 12px; text-align: center; }
-        .code { font-family: monospace; background: #f3f4f6; padding: 10px; border-radius: 6px; margin: 10px 0; }
-        button { background: #ef4444; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; margin: 10px 5px; }
-        button:hover { background: #dc2626; }
-    </style>
-</head>
-<body>
-    <div class="error">
-        <h1>❌ ApprovalMax Authorization Failed</h1>
-        <p><strong>Error:</strong> ${req.query.error}</p>
-        ${req.query.error_description ? `<p><strong>Description:</strong> ${req.query.error_description}</p>` : ''}
-        
-        <p><strong>Full Callback URL:</strong></p>
-        <div class="code">${fullUrl}</div>
-        
-        <button onclick="window.location.href='/'">🏠 Back to Home</button>
-    </div>
-</body>
-</html>
-        `);
-    } else {
-        res.send(`
-<!DOCTYPE html>
-<html>
-<head>
-    <title>ApprovalMax Callback - Unknown</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
-        .info { background: #eff6ff; border: 2px solid #3b82f6; color: #1d4ed8; padding: 20px; border-radius: 12px; }
-        .code { font-family: monospace; background: #f3f4f6; padding: 10px; border-radius: 6px; margin: 10px 0; }
-    </style>
-</head>
-<body>
-    <div class="info">
-        <h1>🤔 ApprovalMax Callback Received</h1>
-        <p>A callback was received, but it doesn't contain an authorization code or error.</p>
-        
-        <p><strong>Full URL:</strong></p>
-        <div class="code">${fullUrl}</div>
-        
-        <p><strong>Parameters:</strong></p>
-        <pre class="code">${JSON.stringify(req.query, null, 2)}</pre>
-        
-        <button onclick="window.location.href='/'">🏠 Back to Home</button>
-    </div>
-</body>
-</html>
-        `);
+
+        // Test 4: Check what statuses actually exist
+        try {
+            const allPOs = await makeApiRequest('/purchase-orders?limit=100');
+            const statuses = [...new Set((allPOs.data || []).map(po => po.status).filter(Boolean))];
+            debug.tests.actualStatuses = {
+                uniqueStatuses: statuses,
+                totalPOs: allPOs.data?.length || 0
+            };
+        } catch (error) {
+            debug.tests.actualStatuses = { error: error.message };
+        }
+
+        res.json(debug);
+    } catch (error) {
+        res.json({
+            success: false,
+            error: error.message
+        });
     }
 });
 
-// Status endpoint
-app.get('/status', (req, res) => {
+// Debug info endpoint
+app.get('/debug/info', (req, res) => {
     res.json({
-        status: 'running',
         timestamp: new Date().toISOString(),
-        callbackUrl: `https://${req.get('host')}/callback`,
-        callbacksReceived: callbacks.length,
-        recentCallbacks: callbacks.slice(0, 3)
+        config: {
+            clientId: APPROVALMAX_CONFIG.clientId,
+            redirectUri: APPROVALMAX_CONFIG.redirectUri,
+            scopes: APPROVALMAX_CONFIG.scopes
+        },
+        tokenStatus: {
+            hasAccessToken: !!tokenData.accessToken,
+            hasRefreshToken: !!tokenData.refreshToken,
+            expiresAt: tokenData.expiresAt,
+            isExpired: tokenData.expiresAt ? tokenData.expiresAt < Date.now() : null
+        },
+        debugResults: debugResults.slice(-5) // Last 5 debug results
     });
-});
-
-// Clear callbacks
-app.post('/clear', (req, res) => {
-    callbacks = [];
-    res.json({ success: true, message: 'Callbacks cleared' });
 });
 
 // Health check
 app.get('/health', (req, res) => {
-    res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+    res.json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        authenticated: !!(tokenData.accessToken && tokenData.expiresAt > Date.now())
+    });
+});
+
+app.listen(port, () => {
+    console.log(`🎯 ApprovalMax API Data Tester running on port ${port}`);
+    console.log(`📡 Callback URL: ${APPROVALMAX_CONFIG.redirectUri}`);
+    console.log(`🔍 Focus: Purchase Order Events debugging`);
+    console.log(`💡 Goal: Find why we get empty arrays when 2 POs are waiting for approval`);
 });
 
 app.listen(port, () => {
