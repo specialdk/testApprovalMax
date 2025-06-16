@@ -496,15 +496,17 @@ app.get('/test/bills', async (req, res) => {
     }
 });
 
-// MAIN FOCUS: Purchase Order Events Testing
+// MAIN FOCUS: Purchase Order Events Testing - UPDATED WITH REAL ENDPOINTS
 app.get('/test/po-events', async (req, res) => {
     try {
-        // Try multiple possible endpoints for PO events
+        // Try the REAL ApprovalMax endpoints based on SyncHub documentation
         const attempts = [
-            '/purchase-orders/events',
-            '/events?type=purchase-order',
-            '/documents/events?documentType=PurchaseOrder',
-            '/purchase-order-events'
+            '/xero-purchase-order',
+            '/xero-bill', 
+            '/quickbooks-purchase-order',
+            '/quickbooks-bill',
+            '/workflow',
+            '/document'
         ];
 
         const results = {};
@@ -526,7 +528,7 @@ app.get('/test/po-events', async (req, res) => {
         }
 
         res.json({
-            message: 'Testing multiple possible PO Events endpoints',
+            message: 'Testing REAL ApprovalMax endpoints from SyncHub documentation',
             attempts,
             results
         });
