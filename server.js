@@ -10,7 +10,7 @@ const port = process.env.PORT || 3000;
 const APPROVALMAX_CONFIG = {
     clientId: process.env.APPROVALMAX_CLIENT_ID || '2A81A6DEEAA244C188D518BA59601780',
     clientSecret: process.env.APPROVALMAX_CLIENT_SECRET || '', // Set this in Railway env vars
-    redirectUri: 'https://testapprovalmax-production.up.railway.app/callback/approvalmax',
+    redirectUri: process.env.APPROVALMAX_REDIRECT_URI || 'https://testapprovalmax-production.up.railway.app/callback',
     baseUrl: 'https://public-api.approvalmax.com/api/v1',
     authUrl: 'https://identity.approvalmax.com/connect/authorize',
     tokenUrl: 'https://identity.approvalmax.com/connect/token',
@@ -303,8 +303,8 @@ app.get('/auth/start', (req, res) => {
     }
 });
 
-// OAuth callback handler - THIS IS THE CRITICAL ENDPOINT FROM YOUR HANDOVER
-app.get('/callback/approvalmax', async (req, res) => {
+// OAuth callback handler - MATCHES RAILWAY ENVIRONMENT VARIABLE
+app.get('/callback', async (req, res) => {
     try {
         const { code, state, error } = req.query;
         
@@ -706,9 +706,4 @@ app.listen(port, () => {
     console.log(`🌐 Test URL: https://testapprovalmax-production.up.railway.app`);
     console.log(`🔍 Focus: Purchase Order Events debugging`);
     console.log(`💡 Goal: Find why we get empty arrays when 2 POs are waiting for approval`);
-});
-
-app.listen(port, () => {
-    console.log(`🎯 ApprovalMax Callback Catcher running on port ${port}`);
-    console.log(`📡 Callback URL will be: https://your-app-name.up.railway.app/callback`);
 });
